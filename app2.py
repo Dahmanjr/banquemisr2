@@ -1,292 +1,372 @@
-"""Banque Misr virtual assistant: Streamlit front end for a Flowise agent."""
+"""
+Banque Misr – AI Chat Assistant
+Streamlit app — deploy to Streamlit Cloud
+
+Requirements (requirements.txt):
+    streamlit
+    requests
+"""
 
 import base64
-import os
-import uuid
-from pathlib import Path
-
+import time
 import requests
 import streamlit as st
+from pathlib import Path
 
-# --------------------------------------------------------------------------
-# Config
-# --------------------------------------------------------------------------
-# Locally this points at your Flowise server. When you deploy to Streamlit
-# Cloud, set FLOWISE_API_URL in the app's Secrets to a publicly reachable URL.
-DEFAULT_API_URL = (
-    "http://localhost:3000/api/v1/prediction/5570de1d-a438-4f08-928e-5732147b70f6"
-)
+# ─── CONFIG ────────────────────────────────────────────────────────────────────
 
+FLOWISE_URL = "http://localhost:3000/api/v1/prediction/5570de1d-a438-4f08-928e-5732147b70f6"
+# ↑ Replace with your public Flowise URL before deploying, e.g.:
+# FLOWISE_URL = "https://cloud.flowiseai.com/api/v1/prediction/YOUR-ID-HERE"
 
-def get_setting(name: str, default: str = "") -> str:
-    try:
-        if name in st.secrets:
-            return str(st.secrets[name])
-    except Exception:  # no secrets.toml present
-        pass
-    return os.getenv(name, default)
-
-
-API_URL = get_setting("FLOWISE_API_URL", DEFAULT_API_URL)
-API_KEY = get_setting("FLOWISE_API_KEY")  # optional
-LOGO_PATH = Path(__file__).parent / "banque_misr_logo.png"
-
-MAROON = "#862F40"
-GOLD = "#E3A91B"
+# ─── PAGE SETUP ────────────────────────────────────────────────────────────────
 
 st.set_page_config(
     page_title="Banque Misr Assistant",
-    page_icon=str(LOGO_PATH) if LOGO_PATH.exists() else "🏦",
+    page_icon="🏦",
     layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
-# --------------------------------------------------------------------------
-# Styling
-# --------------------------------------------------------------------------
-def logo_b64() -> str:
-    return base64.b64encode(LOGO_PATH.read_bytes()).decode() if LOGO_PATH.exists() else ""
+# ─── LOGO AS BASE64 ────────────────────────────────────────────────────────────
 
+def get_logo_b64():
+    logo_path = Path(__file__).parent / "banque_misr_logo.png"
+    if logo_path.exists():
+        return base64.b64encode(logo_path.read_bytes()).decode()
+    return None
 
-CSS = f"""
+logo_b64 = get_logo_b64()
+logo_html = (
+    f'<img src="data:image/png;base64,{logo_b64}" class="brand-logo" alt="Banque Misr"/>'
+    if logo_b64
+    else '<div class="brand-logo-placeholder">BM</div>'
+)
+
+# ─── CSS ───────────────────────────────────────────────────────────────────────
+
+st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700&family=Cormorant+Garamond:wght@300;400;500&display=swap');
 
-html, body, [class*="css"], .stApp, button, input, textarea {{
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, [class*="css"], .stApp {
+    background-color: #f8f4f0 !important;
+    color: #3a1a20;
+    font-family: 'Cairo', sans-serif;
+    font-weight: 400;
+}
+
+/* Hide Streamlit chrome */
+#MainMenu, footer, header,
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"] { display: none !important; }
+
+/* Remove default padding */
+.main .block-container {
+    padding: 0 !important;
+    max-width: 100% !important;
+}
+section[data-testid="stMain"] > div { padding: 0 !important; }
+
+/* ── Page shell ── */
+.page {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 0 20px;
+    position: relative;
+}
+
+/* ── Header ── */
+.brand-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 0 28px;
+    border-bottom: 2px solid rgba(134,47,64,0.18);
+    margin-bottom: 28px;
+    background: linear-gradient(180deg, #fff 0%, #f8f4f0 100%);
+}
+.brand-logo {
+    width: 110px;
+    height: 110px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 18px;
+    border: 2px solid rgba(134,47,64,0.3);
+    box-shadow: 0 4px 20px rgba(134,47,64,0.12);
+}
+.brand-logo-placeholder {
+    width: 110px;
+    height: 110px;
+    border-radius: 50%;
+    background: #862F40;
+    border: 2px solid rgba(134,47,64,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Cairo', sans-serif;
+    font-size: 2rem;
+    font-weight: 700;
+    color: #E3A91B;
+    margin-bottom: 18px;
+}
+.brand-name {
+    font-family: 'Cairo', sans-serif;
+    font-size: 1.8rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: #862F40;
+    text-transform: uppercase;
+    line-height: 1;
+}
+.brand-line {
+    width: 60px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #E3A91B, transparent);
+    margin: 10px auto;
+}
+.brand-sub {
+    font-size: 0.72rem;
+    letter-spacing: 0.3em;
+    color: rgba(134,47,64,0.5);
+    text-transform: uppercase;
+}
+
+/* ── Messages ── */
+.messages-wrap {
+    padding-bottom: 110px;
+}
+
+.msg-block {
+    display: flex;
+    margin-bottom: 20px;
+    gap: 10px;
+    align-items: flex-end;
+}
+.msg-block.user-block { flex-direction: row-reverse; }
+
+.avatar-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+}
+.avatar-dot.bot-av {
+    background: #862F40;
+    border: 1px solid rgba(134,47,64,0.4);
+    color: #E3A91B;
+}
+.avatar-dot.user-av {
+    background: #E3A91B;
+    border: 1px solid rgba(227,169,27,0.4);
+    color: #862F40;
+}
+
+.bubble {
+    max-width: 80%;
+    padding: 13px 17px;
+    font-size: 0.92rem;
+    line-height: 1.8;
+    font-weight: 400;
+    font-family: 'Cairo', sans-serif;
+    unicode-bidi: plaintext;
+    text-align: start;
+}
+.bot-bubble {
+    background: #ffffff;
+    border: 1px solid rgba(134,47,64,0.15);
+    border-left: 3px solid #862F40;
+    border-radius: 0 16px 16px 16px;
+    color: #2a1015;
+    box-shadow: 0 2px 8px rgba(134,47,64,0.06);
+}
+.user-bubble {
+    background: #FBF1D9;
+    border: 1px solid rgba(227,169,27,0.35);
+    border-right: 3px solid #E3A91B;
+    border-radius: 16px 0 16px 16px;
+    color: #2a1015;
+    text-align: start;
+    margin-left: auto;
+    box-shadow: 0 2px 8px rgba(227,169,27,0.08);
+}
+
+/* ── Empty state ── */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px 40px;
+}
+.empty-icon {
+    font-size: 2.6rem;
+    margin-bottom: 20px;
+    opacity: 0.8;
+}
+.empty-title {
+    font-family: 'Cairo', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: #862F40;
+    letter-spacing: 0.03em;
+    margin-bottom: 10px;
+}
+.empty-desc {
+    font-size: 0.85rem;
+    color: rgba(134,47,64,0.5);
+    line-height: 1.9;
+    letter-spacing: 0.02em;
+    max-width: 320px;
+    margin: 0 auto;
+}
+
+/* ── Input box ── */
+[data-testid="stChatInput"] {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: min(680px, 100%) !important;
+    padding: 16px 20px 20px !important;
+    background: linear-gradient(to top, #f8f4f0 75%, transparent) !important;
+    z-index: 999 !important;
+}
+[data-testid="stChatInput"] textarea {
+    background: #ffffff !important;
+    border: 1px solid rgba(134,47,64,0.3) !important;
+    border-radius: 14px !important;
+    color: #2a1015 !important;
     font-family: 'Cairo', sans-serif !important;
-}}
-#MainMenu, footer, [data-testid="stDecoration"] {{ visibility: hidden; }}
-.block-container {{ padding-top: 1.2rem; max-width: 780px; }}
+    font-size: 0.92rem !important;
+    font-weight: 400 !important;
+    caret-color: #862F40 !important;
+    resize: none !important;
+    unicode-bidi: plaintext !important;
+}
+[data-testid="stChatInput"] textarea::placeholder {
+    color: rgba(134,47,64,0.35) !important;
+}
+[data-testid="stChatInput"] textarea:focus {
+    border-color: rgba(134,47,64,0.55) !important;
+    box-shadow: 0 0 0 3px rgba(134,47,64,0.08) !important;
+    outline: none !important;
+}
+button[data-testid="stChatInputSubmitButton"] {
+    background: #862F40 !important;
+    border: 1px solid rgba(134,47,64,0.4) !important;
+    border-radius: 10px !important;
+    color: #E3A91B !important;
+    transition: background 0.2s !important;
+}
+button[data-testid="stChatInputSubmitButton"]:hover {
+    background: #6e2635 !important;
+}
+button[data-testid="stChatInputSubmitButton"] svg { fill: #E3A91B !important; }
 
-/* ---------- header ---------- */
-.bm-header {{
-    display: flex; align-items: center; gap: 16px;
-    background: {MAROON}; color: #fff;
-    padding: 16px 20px; border-radius: 14px;
-    border-bottom: 4px solid {GOLD};
-    margin-bottom: 1.2rem;
-}}
-.bm-header img {{ width: 60px; height: 60px; border-radius: 10px; }}
-.bm-header h1 {{
-    font-size: 1.45rem; font-weight: 700; margin: 0; padding: 0;
-    color: #fff; line-height: 1.25;
-}}
-.bm-header p {{ margin: 2px 0 0; font-size: .92rem; color: #F2DDE1; }}
-
-/* ---------- messages ---------- */
-[data-testid="stChatMessage"] {{
-    border-radius: 14px; padding: 12px 16px; margin-bottom: 10px;
-    background: #fff; border: 1px solid #E8DDD2;
-    border-left: 4px solid {MAROON};
-}}
-[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {{
-    background: #FBF1D9; border: 1px solid #F0DDAA;
-    border-left: 4px solid {GOLD};
-}}
-/* Arabic and English both render in the right direction */
-[data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {{
-    unicode-bidi: plaintext; text-align: start; line-height: 1.7;
-}}
-
-/* ---------- input ---------- */
-[data-testid="stChatInput"] {{ border-radius: 14px; border-color: {MAROON}; }}
-[data-testid="stChatInput"]:focus-within {{
-    border-color: {MAROON}; box-shadow: 0 0 0 2px {MAROON}33;
-}}
-[data-testid="stChatInput"] button {{ background: {MAROON}; color: #fff; }}
-
-/* ---------- suggestion buttons (main area) ---------- */
-.stMain .stButton > button {{
-    width: 100%; text-align: start; justify-content: flex-start;
-    background: #fff; color: {MAROON}; border: 1px solid #DCC9BC;
-    border-radius: 12px; padding: .65rem .9rem; font-weight: 500;
-    transition: border-color .15s, background .15s;
-}}
-.stMain .stButton > button:hover {{
-    border-color: {GOLD}; background: #FFF8E6; color: {MAROON};
-}}
-.bm-hint {{ color: #6B5A5D; font-size: .95rem; margin: .2rem 0 .8rem; }}
-
-/* ---------- sidebar ---------- */
-[data-testid="stSidebar"] {{ background: {MAROON}; }}
-[data-testid="stSidebar"] * {{ color: #fff; }}
-[data-testid="stSidebar"] a {{ color: {GOLD}; text-decoration: none; }}
-[data-testid="stSidebar"] hr {{ border-color: #ffffff33; }}
-[data-testid="stSidebar"] .stButton > button {{
-    background: transparent; border: 1px solid {GOLD}; color: {GOLD};
-    border-radius: 10px; width: 100%;
-}}
-[data-testid="stSidebar"] .stButton > button:hover {{
-    background: {GOLD}; color: {MAROON};
-}}
-.bm-side-block {{ font-size: .92rem; line-height: 1.7; }}
-.bm-side-block b {{ color: {GOLD}; font-weight: 600; }}
+/* ── Mobile tweaks ── */
+@media (max-width: 480px) {
+    .brand-logo { width: 85px; height: 85px; }
+    .brand-name  { font-size: 1.4rem; }
+    .bubble      { font-size: 0.87rem; }
+    .page        { padding: 0 14px; }
+}
 </style>
-"""
-st.markdown(CSS, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# --------------------------------------------------------------------------
-# State
-# --------------------------------------------------------------------------
-WELCOME = (
-    "Welcome to Banque Misr. I can help with branches, accounts, Islamic banking, "
-    "BM Online and BM Wallet. You can write in English or Arabic.\n\n"
-    "أهلاً بك في بنك مصر. اسألني عن الفروع والخدمات المصرفية."
-)
+
+# ─── FLOWISE ───────────────────────────────────────────────────────────────────
+
+def ask_flowise(question: str, session_id: str) -> str:
+    try:
+        resp = requests.post(
+            FLOWISE_URL,
+            json={"question": question, "overrideConfig": {"sessionId": session_id}},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return (
+            data.get("text")
+            or data.get("answer")
+            or data.get("output")
+            or data.get("response")
+            or "عذراً، لم أفهم. ممكن تعيد السؤال؟ / Sorry, I didn't understand. Could you rephrase?"
+        )
+    except Exception:
+        return "عذراً، حدث خطأ مؤقت. حاول مرة ثانية بعد لحظة 🙏 / A temporary error occurred. Please try again."
+
+
+# ─── SESSION ───────────────────────────────────────────────────────────────────
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())  # keeps Flowise memory per visitor
-if "queued" not in st.session_state:
-    st.session_state.queued = None
-
-SUGGESTIONS = [
-    "When was Banque Misr founded?",
-    "How do I find the nearest branch or ATM?",
-    "What is BM Wallet?",
-    "Does Banque Misr offer Islamic banking?",
-    "What is the customer service hotline?",
-    "ما هي خدمات بنك مصر الرقمية؟",
-]
-
-def candidate_urls() -> list[str]:
-    """Try the configured URL first; if it uses localhost, also try 127.0.0.1
-    (some machines resolve localhost to IPv6 while Flowise listens on IPv4)."""
-    urls = [API_URL]
-    if "://localhost" in API_URL:
-        urls.append(API_URL.replace("://localhost", "://127.0.0.1"))
-    return urls
+    st.session_state.session_id = f"user-{int(time.time())}"
 
 
-def host_of(url: str) -> str:
-    return "/".join(url.split("/")[:3])  # scheme://host:port only
+# ─── RENDER PAGE ───────────────────────────────────────────────────────────────
 
+st.markdown('<div class="page">', unsafe_allow_html=True)
 
-def check_connection() -> tuple[bool, str]:
-    """Ping the Flowise server (not the agent) to see if it is reachable."""
-    for url in candidate_urls():
-        base = host_of(url)
-        try:
-            r = requests.get(f"{base}/api/v1/ping", timeout=5)
-            return True, f"Connected to {base} (HTTP {r.status_code})."
-        except requests.exceptions.RequestException:
-            continue
-    return False, f"Cannot reach {host_of(API_URL)}. Is Flowise running?"
-
-
-# --------------------------------------------------------------------------
-# Flowise call
-# --------------------------------------------------------------------------
-def ask_agent(question: str) -> str:
-    headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
-    payload = {
-        "question": question,
-        "overrideConfig": {"sessionId": st.session_state.session_id},
-    }
-    last_error = ""
-    for url in candidate_urls():
-        try:
-            r = requests.post(url, json=payload, headers=headers, timeout=90)
-            r.raise_for_status()
-            data = r.json()
-            return data.get("text") or data.get("answer") or "Sorry, I received an empty reply."
-        except requests.exceptions.ConnectionError as e:
-            last_error = f"Could not connect to `{host_of(url)}` ({type(e).__name__})."
-        except requests.exceptions.Timeout:
-            return "The assistant took too long to answer. Please try again."
-        except requests.exceptions.HTTPError as e:
-            code = e.response.status_code
-            hint = " Set `FLOWISE_API_KEY`." if code in (401, 403) else ""
-            return f"The assistant service returned error {code}.{hint}"
-        except ValueError:
-            return "The assistant service sent a reply I couldn't read."
-    return (
-        f"{last_error} Make sure Flowise is running, and if this app is deployed online, "
-        "set `FLOWISE_API_URL` to a public Flowise address (localhost only works on your own computer)."
-    )
-
-
-# --------------------------------------------------------------------------
-# Sidebar
-# --------------------------------------------------------------------------
-with st.sidebar:
-    if LOGO_PATH.exists():
-        st.image(str(LOGO_PATH), use_container_width=True)
-    st.markdown(
-        """
-<div class="bm-side-block">
-<b>Customer service</b><br>19888 (Egypt hotline)<br><br>
-<b>Website</b><br><a href="https://www.banquemisr.com" target="_blank">www.banquemisr.com</a><br><br>
-<b>Mobile app</b><br>BM Online for iOS and Android
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    st.divider()
-    if st.button("Start a new chat"):
-        st.session_state.messages = []
-        st.session_state.session_id = str(uuid.uuid4())
-        st.rerun()
-    if st.button("Test connection"):
-        ok, msg = check_connection()
-        (st.success if ok else st.error)(msg)
-    st.divider()
-    st.caption("Demo assistant. For account-specific help, call 19888 or visit a branch. "
-               "Never share your PIN, password or OTP in this chat.")
-
-# --------------------------------------------------------------------------
 # Header
-# --------------------------------------------------------------------------
-st.markdown(
-    f"""
-<div class="bm-header">
-  <img src="data:image/png;base64,{logo_b64()}" alt="Banque Misr logo">
-  <div>
-    <h1>Banque Misr Assistant</h1>
-    <p>Ask about branches, accounts, digital banking and more.</p>
-  </div>
+st.markdown(f"""
+<div class="brand-header">
+    {logo_html}
+    <div class="brand-name">Banque Misr</div>
+    <div class="brand-line"></div>
+    <div class="brand-sub">Virtual Assistant</div>
 </div>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
-AVATAR_BOT = str(LOGO_PATH) if LOGO_PATH.exists() else "🏦"
+# Messages
+st.markdown('<div class="messages-wrap">', unsafe_allow_html=True)
 
-# --------------------------------------------------------------------------
-# Conversation
-# --------------------------------------------------------------------------
-with st.chat_message("assistant", avatar=AVATAR_BOT):
-    st.markdown(WELCOME)
-
-for m in st.session_state.messages:
-    with st.chat_message(m["role"], avatar=AVATAR_BOT if m["role"] == "assistant" else None):
-        st.markdown(m["content"])
-
-# Suggestions only before the first question
 if not st.session_state.messages:
-    st.markdown('<p class="bm-hint">Try one of these:</p>', unsafe_allow_html=True)
-    cols = st.columns(2)
-    for i, text in enumerate(SUGGESTIONS):
-        if cols[i % 2].button(text, key=f"sug_{i}"):
-            st.session_state.queued = text
-            st.rerun()
+    st.markdown("""
+    <div class="empty-state">
+        <div class="empty-icon">🏦</div>
+        <div class="empty-title">كيف يمكنني مساعدتك؟</div>
+        <div class="empty-desc">
+            اسألني عن الفروع، الحسابات، الخدمات الرقمية، أو البنوك الإسلامية.<br><br>
+            Ask me about branches, accounts, digital banking, or Islamic services.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            st.markdown(f"""
+            <div class="msg-block user-block">
+                <div class="avatar-dot user-av">أ</div>
+                <div class="bubble user-bubble">{msg["content"]}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="msg-block">
+                <div class="avatar-dot bot-av">BM</div>
+                <div class="bubble bot-bubble">{msg["content"]}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-# --------------------------------------------------------------------------
-# Input
-# --------------------------------------------------------------------------
-typed = st.chat_input("Type your question here… / اكتب سؤالك هنا")
-prompt = typed or st.session_state.queued
-st.session_state.queued = None
+st.markdown('</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-if prompt:
+# ─── INPUT ─────────────────────────────────────────────────────────────────────
+
+if prompt := st.chat_input("اكتب سؤالك هنا... / Type your question here..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant", avatar=AVATAR_BOT):
-        with st.spinner("Looking that up…"):
-            answer = ask_agent(prompt)
-        st.markdown(answer)
-    st.session_state.messages.append({"role": "assistant", "content": answer})
-    if len(st.session_state.messages) == 2:
-        st.rerun()  # first exchange: refresh so the suggestion buttons disappear
+    with st.spinner(""):
+        reply = ask_flowise(prompt, st.session_state.session_id)
+    st.session_state.messages.append({"role": "assistant", "content": reply})
+    st.rerun()
