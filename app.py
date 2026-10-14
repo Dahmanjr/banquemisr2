@@ -26,8 +26,7 @@ def query(question: str) -> str:
         return f"⚠️ An error occurred: {str(e)}"
 
 # ── Logo (embed from uploaded file) ──────────────────────────────────────────
-LOGO_PATH = "/mnt/user-data/uploads/1791984365055_image.png"
-
+LOGO_PATH = r"C:\Users\Mr Hack\Downloads\Banquemisr bot\logo.png"
 def get_logo_base64(path: str) -> str:
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
